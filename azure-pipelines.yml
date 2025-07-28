@@ -1,19 +1,25 @@
-# Starter pipeline
-# Start with a minimal pipeline that you can customize to build and deploy your code.
-# Add steps that build, run tests, deploy, and more:
-# https://aka.ms/yaml
-
 trigger:
-- main
+- master
 
 pool:
-  vmImage: ubuntu-latest
+  vmImage: 'ubuntu-latest'
+
+variables:
+  pythonVersion: '3.11'
 
 steps:
-- script: echo Hello, world!
-  displayName: 'Run a one-line script'
+- task: UsePythonVersion@0
+  inputs:
+    versionSpec: '$(pythonVersion)'
 
 - script: |
-    echo Add other tasks to build, test, and deploy your project.
-    echo See https://aka.ms/yaml
-  displayName: 'Run a multi-line script'
+    python -m pip install --upgrade pip
+    pip install -r backend/requirements.txt
+  displayName: 'Install dependencies'
+
+- task: AzureWebApp@1
+  inputs:
+    azureSubscription: '0a1881fa-6985-47c8-90ca-e514b0cff23d'
+    appType: webAppLinux
+    appName: 'gaief-demo-app'
+    package: '$(System.DefaultWorkingDirectory)/backend'
