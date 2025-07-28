@@ -1,5 +1,7 @@
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import openai  # Make sure 'openai' is in requirements.txt
 import os
@@ -21,6 +23,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Mount the 'frontend' folder
+app.mount("/static", StaticFiles(directory="frontend"), name="static")
+
+# Serve index.html at root
+@app.get("/")
+async def root():
+    return FileResponse(os.path.join("frontend", "index.html"))
 
 class ChatRequest(BaseModel):
     user_role: str
