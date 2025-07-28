@@ -19,7 +19,7 @@ steps:
 
 - task: AzureWebApp@1
   inputs:
-    azureSubscription: '0a1881fa-6985-47c8-90ca-e514b0cff23d'
+    azureSubscription: 'e65be8a2-561a-4b94-a0de-c781bc71d208'
     appType: webAppLinux
     appName: 'gaief-demo-app'
     package: '$(System.DefaultWorkingDirectory)/backend'
