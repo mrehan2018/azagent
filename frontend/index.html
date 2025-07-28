@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>GAIEF Demo Assistant</title>
+</head>
+<body>
+  <h1>Welcome to GAIEF</h1>
+  <label for="role">Select Role:</label>
+  <select id="role">
+    <option value="student">Student</option>
+    <option value="teacher">Teacher</option>
+    <option value="parent">Parent</option>
+  </select><br><br>
+
+  <label for="topic">Topic:</label>
+  <input type="text" id="topic"><br><br>
+
+  <label for="context">Context:</label><br>
+  <textarea id="context" rows="5" cols="50"></textarea><br><br>
+
+  <button onclick="getAIResponse()">Ask AI</button><br><br>
+
+  <h3>OR Upload a PDF/Test</h3>
+  <input type="file" id="upload"><br>
+  <button onclick="uploadTest()">Upload and Analyze</button><br>
+
+  <p id="output"></p>
+
+<script>
+  async function getAIResponse() {
+    const role = document.getElementById('role').value;
+    const topic = document.getElementById('topic').value;
+    const context = document.getElementById('context').value;
+
+    const res = await fetch('/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_role: role, topic: topic, context: context })
+    });
+    const data = await res.json();
+    document.getElementById('output').innerText = data.reply || data.error;
+  }
+
+  async function uploadTest() {
+    const role = document.getElementById('role').value;
+    const topic = document.getElementById('topic').value;
+    const file = document.getElementById('upload').files[0];
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("role", role);
+    formData.append("topic", topic);
+
+    const res = await fetch('/upload-test', {
+      method: 'POST',
+      body: formData
+    });
+    const data = await res.json();
+    document.getElementById('output').innerText = data.reply || data.error;
+  }
+</script>
+</body>
+</html>
