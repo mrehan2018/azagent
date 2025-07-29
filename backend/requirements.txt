@@ -1,7 +1,5 @@
 fastapi
-uvicorn
-gunicorn
 openai
 requests
-python-multipart
-aiofiles
+uvicorn[standard]
+gunicorn
