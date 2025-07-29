@@ -3,15 +3,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from openai import OpenAI  # Updated import
+from openai import OpenAI
 import os
 import requests
-import time  # Move to top
+import time
 
 from prompt_router import get_prompt
 
 # Initialize OpenAI client (new API)
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+api_key = os.getenv("OPENAI_API_KEY")
+if not api_key:
+    print("WARNING: OPENAI_API_KEY not set!")
+
+client = OpenAI(api_key=api_key) if api_key else None
 
 doc_intel_endpoint = os.getenv("DOC_INTELLIGENCE_ENDPOINT")
 doc_intel_key = os.getenv("DOC_INTELLIGENCE_KEY")
@@ -26,14 +30,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount the 'frontend' folder
-app.mount("/static", StaticFiles(directory="frontend"), name="static")
-
-# Serve index.html at root
-@app.get("/")
-async def root():
-    return FileResponse(os.path.join("frontend", "index.html"))
-
 class ChatRequest(BaseModel):
     user_role: str
     topic: str
@@ -41,6 +37,9 @@ class ChatRequest(BaseModel):
 
 @app.post("/chat")
 async def chat_endpoint(req: ChatRequest):
+    if not client:
+        return {"error": "OpenAI client not initialized - API key missing"}
+    
     prompt = get_prompt(req.user_role, req.topic, req.context)
     try:
         response = client.chat.completions.create(
@@ -55,6 +54,9 @@ async def chat_endpoint(req: ChatRequest):
 
 @app.post("/upload-test")
 async def upload_test(file: UploadFile = File(...), role: str = Form(...), topic: str = Form(...)):
+    if not client:
+        return {"error": "OpenAI client not initialized - API key missing"}
+    
     # Send to Azure Document Intelligence
     ocr_url = f"{doc_intel_endpoint}/formrecognizer/documentModels/prebuilt-layout:analyze?api-version=2023-07-31"
     headers = {
@@ -84,3 +86,6 @@ async def upload_test(file: UploadFile = File(...), role: str = Form(...), topic
         max_tokens=500
     )
     return {"reply": response.choices[0].message.content, "extracted_text": full_text[:500]}
+
+# Mount the frontend at root - this should be LAST
+app.mount("/", StaticFiles(directory="frontend", html=True), name="static")
