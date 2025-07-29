@@ -3,13 +3,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-import openai  # Make sure 'openai' is in requirements.txt
+from openai import OpenAI  # Updated import
 import os
-import requests  # Confirm that 'requests' is listed in requirements.txt for deployment
+import requests
+import time  # Move to top
 
 from prompt_router import get_prompt
 
-openai.api_key = os.getenv("OPENAI_API_KEY")  # Set this in Azure App Service Configuration
+# Initialize OpenAI client (new API)
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 doc_intel_endpoint = os.getenv("DOC_INTELLIGENCE_ENDPOINT")
 doc_intel_key = os.getenv("DOC_INTELLIGENCE_KEY")
@@ -41,7 +43,7 @@ class ChatRequest(BaseModel):
 async def chat_endpoint(req: ChatRequest):
     prompt = get_prompt(req.user_role, req.topic, req.context)
     try:
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model="gpt-4o",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7,
@@ -64,7 +66,6 @@ async def upload_test(file: UploadFile = File(...), role: str = Form(...), topic
     result_url = response.headers.get("operation-location")
 
     # Wait and fetch result
-    import time
     for _ in range(10):
         time.sleep(2)
         poll = requests.get(result_url, headers={"Ocp-Apim-Subscription-Key": doc_intel_key}).json()
@@ -74,9 +75,9 @@ async def upload_test(file: UploadFile = File(...), role: str = Form(...), topic
     else:
         return {"error": "OCR timed out"}
 
-    # Route to GPT
+    # Route to GPT (updated API)
     prompt = get_prompt(role, topic, full_text[:5000])  # Truncate if needed
-    response = openai.ChatCompletion.create(
+    response = client.chat.completions.create(
         model="gpt-4o",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.7,
