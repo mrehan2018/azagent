@@ -9,7 +9,6 @@ async function lookupUser() {
     return;
   }
 
-  // Fix URL to match your FastAPI routes
   const url = `/api/v1/${role}s/${userId}`;
 
   try {
