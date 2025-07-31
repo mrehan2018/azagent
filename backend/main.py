@@ -141,3 +141,71 @@ async def root():
             "azure_openai_configured": client is not None,
             "frontend_available": os.path.exists("frontend")
         }
+
+# Debug endpoints
+@app.get("/debug/cosmos")
+async def debug_cosmos():
+    try:
+        from cosmos_client import get_container
+        
+        # Test students container
+        students_container = get_container("students")
+        students = list(students_container.query_items("SELECT TOP 3 * FROM c", enable_cross_partition_query=True))
+        
+        # Test parents container
+        parents_container = get_container("parents")
+        parents = list(parents_container.query_items("SELECT TOP 3 * FROM c", enable_cross_partition_query=True))
+        
+        return {
+            "cosmos_configured": True,
+            "students_count": len(students),
+            "students_sample": students,
+            "parents_count": len(parents), 
+            "parents_sample": parents,
+            "cosmos_endpoint": os.getenv("COSMOS_ENDPOINT"),
+            "cosmos_db_name": os.getenv("COSMOS_DB_NAME")
+        }
+    except Exception as e:
+        return {
+            "cosmos_configured": False,
+            "error": str(e),
+            "cosmos_endpoint": bool(os.getenv("COSMOS_ENDPOINT")),
+            "cosmos_key_set": bool(os.getenv("COSMOS_KEY")),
+            "cosmos_db_name": os.getenv("COSMOS_DB_NAME")
+        }
+
+@app.get("/debug/student/{student_id}")
+async def debug_student(student_id: str):
+    try:
+        from cosmos_client import get_container
+        container = get_container("students")
+        
+        results = {}
+        
+        # Method 1: Try different partition key approaches
+        try:
+            item1 = container.read_item(item=student_id, partition_key=student_id)
+            results["read_with_id"] = item1
+        except Exception as e:
+            results["read_with_id_error"] = str(e)
+        
+        # Method 2: Query approach
+        try:
+            query = f"SELECT * FROM c WHERE c.id = '{student_id}'"
+            items = list(container.query_items(query, enable_cross_partition_query=True))
+            results["query_by_id"] = items
+        except Exception as e:
+            results["query_by_id_error"] = str(e)
+            
+        # Method 3: Query by userId
+        try:
+            query = f"SELECT * FROM c WHERE c.userId = '{student_id}'"
+            items = list(container.query_items(query, enable_cross_partition_query=True))
+            results["query_by_userId"] = items
+        except Exception as e:
+            results["query_by_userId_error"] = str(e)
+        
+        return results
+        
+    except Exception as e:
+        return {"error": f"General error: {str(e)}"}

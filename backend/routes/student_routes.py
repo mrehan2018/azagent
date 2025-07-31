@@ -8,13 +8,16 @@ async def get_student(student_id: str):
     try:
         container = get_container("students")
         
-        # Using student_id for both item and partition_key (since userId = id in your data)
-        item = container.read_item(item=student_id, partition_key=student_id)
-        return item
+        # Use query instead of read_item to avoid partition key issues
+        query = f"SELECT * FROM c WHERE c.id = '{student_id}' OR c.userId = '{student_id}'"
+        items = list(container.query_items(query, enable_cross_partition_query=True))
         
-    except Exception as e:
-        # Check if it's a "not found" error
-        if "NotFound" in str(type(e)) or "404" in str(e):
-            raise HTTPException(status_code=404, detail=f"Student {student_id} not found")
+        if items:
+            return items[0]  # Return the first match
         else:
-            raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+            raise HTTPException(status_code=404, detail=f"Student {student_id} not found")
+            
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
