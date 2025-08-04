@@ -1,0 +1,42 @@
+=== GAIEF PROJECT BACKUP CONFIGURATION ===
+Date: Wed Jul 30 19:35:48 CDT 2025
+Working Version: v1.0
+
+ENVIRONMENT VARIABLES NEEDED:
+- AZURE_OPENAI_ENDPOINT=your-endpoint
+- AZURE_OPENAI_API_KEY=your-key
+- AZURE_OPENAI_API_VERSION=2024-02-01
+- AZURE_OPENAI_DEPLOYMENT=your-deployment-name
+- DOC_INTELLIGENCE_ENDPOINT=your-doc-intel-endpoint
+- DOC_INTELLIGENCE_KEY=your-doc-intel-key
+- COSMOS_ENDPOINT=your-cosmos-endpoint
+- COSMOS_KEY=your-cosmos-key
+- COSMOS_DB_NAME=your-database-name
+
+WORKING ENDPOINTS:
+- Main App: https://gaief-demo-app-eyd2anfafbaxgghn.centralus-01.azurewebsites.net/
+- API Docs: https://gaief-demo-app-eyd2anfafbaxgghn.centralus-01.azurewebsites.net/docs
+- Health: /health
+- Students: /api/v1/students/{id}
+- Teachers: /api/v1/teachers/{id}
+- Parents: /api/v1/parents/{id}
+- Chat: /chat (POST)
+- Debug: /debug/cosmos
+
+PROJECT STRUCTURE:
+backend/
+├── main.py
+├── requirements.txt
+├── cosmos_client.py
+├── prompt_router.py
+├── routes/
+│   ├── __init__.py
+│   ├── student_routes.py
+│   ├── teacher_routes.py
+│   └── parent_routes.py
+└── frontend/
+    ├── index.html
+    └── script.js
+
+DEPLOYMENT COMMAND:
+az webapp deploy --resource-group gaief-demo --name gaief-demo-app --src-path . --type zip

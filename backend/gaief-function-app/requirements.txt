@@ -1,0 +1,5 @@
+azure-functions
+python-multipart
+requests
+openai>==1.0.0
+azure-ai-formrecognizer

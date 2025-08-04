@@ -6,11 +6,14 @@ from pydantic import BaseModel
 import os
 import requests
 import time
+import logging
+import json
 
 from prompt_router import get_prompt
 from routes.student_routes import router as student_router
 from routes.teacher_routes import router as teacher_router
 from routes.parent_routes import router as parent_router
+from cosmos_client import save_chat_to_cosmos, get_chat_history_from_user, create_chat_container_if_not_exists
 
 # Initialize Azure OpenAI client with error handling
 try:
@@ -45,10 +48,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include the student, teacher, and parent routes
-app.include_router(student_router, prefix="/api/v1", tags=["students"])
-app.include_router(teacher_router, prefix="/api/v1", tags=["teachers"])
-app.include_router(parent_router, prefix="/api/v1", tags=["parents"])
+# Include all API routes
+app.include_router(student_router, prefix="/api/v1")
+app.include_router(teacher_router, prefix="/api/v1")
+app.include_router(parent_router, prefix="/api/v1")
 
 class ChatRequest(BaseModel):
     user_role: str
@@ -66,6 +69,11 @@ async def health():
 
 @app.post("/chat")
 async def chat_endpoint(req: ChatRequest):
+    logging.info(f"=== CHAT ENDPOINT CALLED ===")
+    logging.info(f"user_role: {req.user_role}")
+    logging.info(f"topic: {req.topic}")
+    logging.info(f"context: {req.context}")
+    
     if not client:
         return {"error": "Azure OpenAI client not configured - check environment variables"}
     
@@ -77,9 +85,42 @@ async def chat_endpoint(req: ChatRequest):
             temperature=0.7,
             max_tokens=500
         )
-        return {"reply": response.choices[0].message.content}
+        
+        ai_reply = response.choices[0].message.content
+        logging.info(f"AI Reply generated: {ai_reply[:100]}...")
+        
+        # Extract user_id from context
+        try:
+            context_data = json.loads(req.context)
+            user_id = context_data.get("userId") or context_data.get("id", "unknown")
+        except (json.JSONDecodeError, TypeError):
+            user_id = req.context if req.context else "unknown"
+        
+        logging.info(f"Final user_id for saving: {user_id}")
+        
+        # Save chat using the simple function
+        try:
+            chat_saved = save_chat_to_cosmos(
+                user_id=user_id,
+                user_role=req.user_role,
+                question=req.topic,
+                answer=ai_reply
+            )
+            logging.info(f"Chat save result: {chat_saved}")
+            
+        except Exception as save_error:
+            logging.error(f"FAILED TO SAVE CHAT: {save_error}")
+            chat_saved = False
+        
+        return {
+            "reply": ai_reply, 
+            "user_id": user_id, 
+            "chat_saved": chat_saved
+        }
+        
     except Exception as e:
-        return {"error": f"Azure OpenAI error: {str(e)}"}
+        logging.error(f"Chat endpoint error: {str(e)}")
+        return {"error": f"Chat error: {str(e)}"}
 
 @app.post("/upload-test")
 async def upload_test(file: UploadFile = File(...), role: str = Form(...), topic: str = Form(...)):
@@ -148,31 +189,28 @@ async def debug_cosmos():
     try:
         from cosmos_client import get_container
         
-        # Test students container
-        students_container = get_container("students")
-        students = list(students_container.query_items("SELECT TOP 3 * FROM c", enable_cross_partition_query=True))
+        # Test all containers
+        results = {}
         
-        # Test parents container
-        parents_container = get_container("parents")
-        parents = list(parents_container.query_items("SELECT TOP 3 * FROM c", enable_cross_partition_query=True))
+        for container_name in ["students", "teachers", "parents"]:
+            try:
+                container = get_container(container_name)
+                query = "SELECT TOP 3 * FROM c"
+                items = list(container.query_items(query, enable_cross_partition_query=True))
+                results[container_name] = {
+                    "count": len(items),
+                    "sample_data": items
+                }
+            except Exception as e:
+                results[container_name] = {"error": str(e)}
         
         return {
-            "cosmos_configured": True,
-            "students_count": len(students),
-            "students_sample": students,
-            "parents_count": len(parents), 
-            "parents_sample": parents,
-            "cosmos_endpoint": os.getenv("COSMOS_ENDPOINT"),
-            "cosmos_db_name": os.getenv("COSMOS_DB_NAME")
+            "cosmos_status": "connected",
+            "containers": results
         }
+        
     except Exception as e:
-        return {
-            "cosmos_configured": False,
-            "error": str(e),
-            "cosmos_endpoint": bool(os.getenv("COSMOS_ENDPOINT")),
-            "cosmos_key_set": bool(os.getenv("COSMOS_KEY")),
-            "cosmos_db_name": os.getenv("COSMOS_DB_NAME")
-        }
+        return {"error": f"Cosmos debug failed: {str(e)}"}
 
 @app.get("/debug/student/{student_id}")
 async def debug_student(student_id: str):
@@ -180,32 +218,155 @@ async def debug_student(student_id: str):
         from cosmos_client import get_container
         container = get_container("students")
         
+        # Try multiple query approaches
         results = {}
         
-        # Method 1: Try different partition key approaches
-        try:
-            item1 = container.read_item(item=student_id, partition_key=student_id)
-            results["read_with_id"] = item1
-        except Exception as e:
-            results["read_with_id_error"] = str(e)
+        # Query 1: By userId
+        query1 = f"SELECT * FROM c WHERE c.userId = '{student_id}'"
+        items1 = list(container.query_items(query1, enable_cross_partition_query=True))
+        results["query_by_userId"] = items1
         
-        # Method 2: Query approach
-        try:
-            query = f"SELECT * FROM c WHERE c.id = '{student_id}'"
-            items = list(container.query_items(query, enable_cross_partition_query=True))
-            results["query_by_id"] = items
-        except Exception as e:
-            results["query_by_id_error"] = str(e)
-            
-        # Method 3: Query by userId
-        try:
-            query = f"SELECT * FROM c WHERE c.userId = '{student_id}'"
-            items = list(container.query_items(query, enable_cross_partition_query=True))
-            results["query_by_userId"] = items
-        except Exception as e:
-            results["query_by_userId_error"] = str(e)
+        # Query 2: By id
+        query2 = f"SELECT * FROM c WHERE c.id = '{student_id}'"
+        items2 = list(container.query_items(query2, enable_cross_partition_query=True))
+        results["query_by_id"] = items2
         
-        return results
+        # Query 3: Get all students (first 5)
+        query3 = "SELECT TOP 5 * FROM c"
+        items3 = list(container.query_items(query3, enable_cross_partition_query=True))
+        results["all_students_sample"] = items3
+        
+        # Query 4: Search partial match
+        query4 = f"SELECT * FROM c WHERE CONTAINS(c.id, '{student_id}') OR CONTAINS(c.userId, '{student_id}')"
+        items4 = list(container.query_items(query4, enable_cross_partition_query=True))
+        results["partial_match"] = items4
+        
+        return {
+            "student_id_searched": student_id,
+            "results": results,
+            "total_queries": 4
+        }
         
     except Exception as e:
-        return {"error": f"General error: {str(e)}"}
+        return {"error": f"Debug failed: {str(e)}"}
+
+@app.get("/debug/test")
+async def debug_test():
+    return {
+        "message": "Debug endpoint working",
+        "timestamp": "2025-01-01",
+        "environment": {
+            "cosmos_endpoint": bool(os.getenv("COSMOS_ENDPOINT")),
+            "cosmos_key": bool(os.getenv("COSMOS_KEY")),
+            "cosmos_db": os.getenv("COSMOS_DB_NAME")
+        }
+    }
+
+@app.post("/debug/test-chat-save")
+async def debug_test_chat_save():
+    """Test the simple chat saving functionality"""
+    try:
+        from cosmos_client import save_chat_to_cosmos
+        
+        # Test saving for student
+        result = save_chat_to_cosmos(
+            user_id="stu_12345",
+            user_role="student", 
+            question="Test question - what is my math progress?",
+            answer="Test answer - Your math progress is 88%"
+        )
+        
+        return {
+            "status": "success" if result else "failed",
+            "chat_saved": result,
+            "message": "Check /debug/student/stu_12345 to verify"
+        }
+        
+    except Exception as e:
+        return {
+            "status": "failed",
+            "error": str(e)
+        }
+
+@app.get("/debug/chat-history/{user_id}")
+async def debug_chat_history(user_id: str, user_role: str = "student"):
+    """Get chat history using the simple approach"""
+    try:
+        from cosmos_client import get_chat_history_from_user
+        
+        chat_history = get_chat_history_from_user(user_id, user_role)
+        
+        return {
+            "user_id": user_id,
+            "user_role": user_role,
+            "chat_history_count": len(chat_history),
+            "chat_history": chat_history
+        }
+        
+    except Exception as e:
+        return {"error": f"Failed to get chat history: {str(e)}"}
+
+@app.get("/test-chat-simple")
+async def test_chat_simple():
+    """Simple test to manually trigger a chat save"""
+    try:
+        # Simulate a chat request
+        test_request = ChatRequest(
+            user_role="student",
+            topic="What is my math grade?",
+            context='{"userId":"stu_12345","name":"Aisha Khan"}'
+        )
+        
+        # Call your existing chat endpoint
+        result = await chat_endpoint(test_request)
+        
+        return {
+            "test_status": "completed",
+            "chat_result": result,
+            "message": "Check /debug/student/stu_12345 to see if chatHistory was updated"
+        }
+        
+    except Exception as e:
+        return {
+            "test_status": "failed",
+            "error": str(e)
+        }
+
+@app.get("/api/v1/parent-access/{parent_id}/student/{student_id}")
+async def parent_access_student(parent_id: str, student_id: str):
+    """Allow parents to access their child's data"""
+    try:
+        from cosmos_client import get_container, get_chat_history_from_user
+        
+        # Get parent data to verify relationship
+        parent_container = get_container("parents")
+        parent_doc = parent_container.read_item(item=parent_id, partition_key=parent_id)
+        
+        # Check if this parent has access to this student
+        allowed_students = parent_doc.get("children", [])
+        if student_id not in allowed_students:
+            return {"error": "Access denied: You are not authorized to view this student's data"}
+        
+        # Get student data
+        student_container = get_container("students")
+        student_doc = student_container.read_item(item=student_id, partition_key=student_id)
+        
+        # Get chat history
+        chat_history = get_chat_history_from_user(student_id, "student")
+        
+        return {
+            "student_info": {
+                "name": student_doc.get("name"),
+                "grade": student_doc.get("grade"),
+                "subjects": student_doc.get("subjects"),
+                "progress": student_doc.get("progress")
+            },
+            "chat_summary": {
+                "total_conversations": len(chat_history),
+                "recent_activity": chat_history[:5] if chat_history else []
+            },
+            "parent_access": True
+        }
+        
+    except Exception as e:
+        return {"error": f"Failed to retrieve student data: {str(e)}"}
